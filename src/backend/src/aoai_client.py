@@ -81,11 +81,12 @@ class AOAIClient(OpenAI):
         self,
         language: str,
         id: str
-    ) -> list:
+    ) -> tuple[list, list]:
         """
         AOAI function calling.
 
-        Returns function-call responses.
+        Returns:
+            Tuple of (function_responses, tool_calls_info) for logging/display
         """
         # Call chat API with function-calling enabled:
         response = self.chat.completions.create(
@@ -102,6 +103,8 @@ class AOAIClient(OpenAI):
 
         # Handle function calls:
         function_responses = []
+        tool_calls_info = []
+
         if response_message.tool_calls:
             for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
@@ -109,13 +112,19 @@ class AOAIClient(OpenAI):
                 self.logger.info(f"Function call: {function_name}")
                 self.logger.info(f"Function arguments: {function_args}")
 
+                # Store tool call info for UI display
+                tool_calls_info.append({
+                    "id": tool_call.id,
+                    "name": function_name,
+                    "arguments": function_args
+                })
+
                 if function_name in self.functions:
-                    # All functions require single extracted parameter:
-                    func_input = next(iter(function_args.values()))
+                    # Call the function with its arguments
                     func = self.functions[function_name]
-                    func_response = func(func_input, language, id)
+                    func_response = func(**function_args)
                 else:
-                    func_response = json.dumps({"error": "Unknown function"})
+                    func_response = {"error": f"Unknown function: {function_name}"}
 
                 function_responses.append(func_response)
                 self.logger.info(f"Function response: {str(func_response)}")
@@ -123,12 +132,12 @@ class AOAIClient(OpenAI):
                     "tool_call_id": tool_call.id,
                     "role": "tool",
                     "name": function_name,
-                    "content": str(func_response)
+                    "content": json.dumps(func_response) if isinstance(func_response, dict) else str(func_response)
                 })
         else:
             self.logger.info("No tool calls made by model.")
 
-        return function_responses
+        return function_responses, tool_calls_info
 
     def generate_rag_prompt(
         self,
@@ -165,17 +174,31 @@ class AOAIClient(OpenAI):
         self,
         message: str,
         language: str = None,
-        id: str = None
-    ) -> str:
+        id: str = None,
+        return_tool_calls: bool = False
+    ) -> str | dict:
         """
-        AOAI chat completion.
+        AOAI chat completion with optional tool calling.
+
+        Args:
+            message: User message
+            language: Language code (optional)
+            id: Request ID (optional)
+            return_tool_calls: If True, returns dict with content and tool_calls info
+
+        Returns:
+            Response content string, or dict with content and tool_calls if return_tool_calls=True
         """
         # Add user message:
         prompt = self.generate_rag_prompt(message) if self.use_rag else message
         self.messages.append({"role": "user", "content": prompt})
 
+        tool_calls_made = []
+
         if self.function_calling:
-            function_results = self.call_functions(language=language, id=id)
+            function_results, tool_calls_info = self.call_functions(language=language, id=id)
+            tool_calls_made = tool_calls_info
+
             if self.return_functions:
                 # Return function-call results directly:
                 return function_results
@@ -190,5 +213,11 @@ class AOAIClient(OpenAI):
         print(f"   📥 OpenAI response: {response_message.content}")
         self.logger.info(f"Model response: {response_message}")
         self.messages.append(response_message)
+
+        if return_tool_calls and tool_calls_made:
+            return {
+                "content": response_message.content,
+                "tool_calls": tool_calls_made
+            }
 
         return response_message.content

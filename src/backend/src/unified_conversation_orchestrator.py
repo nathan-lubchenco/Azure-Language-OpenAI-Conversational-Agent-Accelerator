@@ -52,10 +52,19 @@ class UnifiedConversationOrchestrator():
     def orchestrate(
         self,
         message: str,
-        id: str = None
+        id: str = None,
+        return_tool_calls: bool = False
     ) -> dict:
         """
         Orchestrate message with registered router/fallback-function.
+
+        Args:
+            message: User message
+            id: Optional request ID
+            return_tool_calls: If True, request tool call info from fallback function
+
+        Returns:
+            Orchestration response dict
         """
         if id is None:
             id = str(uuid.uuid4())
@@ -76,7 +85,8 @@ class UnifiedConversationOrchestrator():
             fallback_result = self.fallback_function(
                 message,
                 language,
-                id)
+                id,
+                return_tool_calls=return_tool_calls)
 
             orchestration_response["route"] = "fallback"
             orchestration_response["result"] = fallback_result

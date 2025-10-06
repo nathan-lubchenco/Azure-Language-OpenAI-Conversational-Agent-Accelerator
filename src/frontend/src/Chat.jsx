@@ -7,9 +7,10 @@ const Chat = () => {
     const [messages, setMessages] = useState([]);
     const [isTyping, setIsTyping] = useState(false);
     const [needMoreInfo, setNeedMoreInfo] = useState(false);
+    const [expandedToolCalls, setExpandedToolCalls] = useState({});
 
     const messageEndRef = useRef(null);
-    const welcomeMessage = 'Ask a question...';
+    const welcomeMessage = '✨ Welcome to LifePath AI! I remember your life story and can help you reflect on your experiences, track your growth, and navigate important life domains. Try asking me about your past experiences, achievements, or share something new!';
 
     const scrollToBottom = () => {
         messageEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -18,6 +19,13 @@ const Chat = () => {
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+
+    const toggleToolCall = (messageIndex) => {
+        setExpandedToolCalls(prev => ({
+            ...prev,
+            [messageIndex]: !prev[messageIndex]
+        }));
+    };
 
     const createSystemInput = (userMessageContent) => {
 
@@ -42,6 +50,7 @@ const Chat = () => {
     const parseSystemResponse = (systemResponse) => {
         return {
             messages: systemResponse["messages"] || [],
+            toolCalls: systemResponse["tool_calls"] || null,
             needMoreInfo: systemResponse["need_more_info"] || false
         };
     };
@@ -58,15 +67,16 @@ const Chat = () => {
             }
 
             const systemResponse = await response.json();
-            const { messages, needMoreInfo } = parseSystemResponse(systemResponse);
+            const { messages, toolCalls, needMoreInfo } = parseSystemResponse(systemResponse);
 
             console.log("System messages:", messages);
+            console.log("Tool calls:", toolCalls);
             setNeedMoreInfo(needMoreInfo);
 
-            return { messages };
+            return { messages, toolCalls };
         } catch (error) {
             console.error("Error while processing chat: ", error);
-            return { messages: [] };
+            return { messages: [], toolCalls: null };
         }
     };
 
@@ -76,26 +86,84 @@ const Chat = () => {
         ]);
 
         setIsTyping(true);
-        const { messages: systemMessages } = await chatWithSystem(userMessageContent);
+        const { messages: systemMessages, toolCalls } = await chatWithSystem(userMessageContent);
         setIsTyping(false);
 
+        // Add tool calls as a separate message if present
+        if (toolCalls && toolCalls.length > 0) {
+            setMessages((prevMessages) => [
+                ...prevMessages,
+                { role: "ToolCalls", toolCalls: toolCalls }
+            ]);
+        }
+
+        // Add system responses
         for (const msg of systemMessages) {
             setMessages((prevMessages) => [
-                ...prevMessages, 
+                ...prevMessages,
                 { role: "System", content: msg }
             ]);
         }
     };
 
+    const renderToolCall = (toolCall, index) => {
+        const getToolIcon = (name) => {
+            if (name === 'search_memories') return '🔍';
+            if (name === 'store_memory') return '💾';
+            return '🔧';
+        };
+
+        return (
+            <div key={index} className="tool-call-item">
+                <div className="tool-call-name">
+                    {getToolIcon(toolCall.name)} {toolCall.name}
+                </div>
+                <div className="tool-call-args">
+                    {Object.entries(toolCall.arguments).map(([key, value]) => (
+                        <div key={key} className="tool-arg">
+                            <span className="tool-arg-key">{key}:</span>
+                            <span className="tool-arg-value">{JSON.stringify(value)}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="chat-container">
             <div className="chat-messages">
-                {messages.length == 0 && (<div className="message.content">{welcomeMessage}</div>)}
+                {messages.length == 0 && (<div className="message-content">{welcomeMessage}</div>)}
                 {messages.map((message, index) => (
-                    <div key={index} tabindex="0" className={message.role === 'user' ? "message.user" : "message.agent"}>
+                    <div key={index} tabIndex="0" className={
+                        message.role === 'User' ? "message-user" :
+                        message.role === 'ToolCalls' ? "message-toolcalls" :
+                        "message-agent"
+                    }>
                         <div className="message">
-                            <h3 className="message-header">{message.role}</h3>
-                            <Markdown className="message.content">{message.content}</Markdown>
+                            {message.role === 'ToolCalls' ? (
+                                <div className="tool-calls-container">
+                                    <div
+                                        className="tool-calls-header"
+                                        onClick={() => toggleToolCall(index)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <h3 className="message-header">
+                                            {expandedToolCalls[index] ? '▼' : '▶'} Tool Calls ({message.toolCalls.length})
+                                        </h3>
+                                    </div>
+                                    {expandedToolCalls[index] && (
+                                        <div className="tool-calls-list">
+                                            {message.toolCalls.map((toolCall, tcIndex) => renderToolCall(toolCall, tcIndex))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <>
+                                    <h3 className="message-header">{message.role}</h3>
+                                    <Markdown className="message-content">{message.content}</Markdown>
+                                </>
+                            )}
                         </div>
                     </div>
                 ))}

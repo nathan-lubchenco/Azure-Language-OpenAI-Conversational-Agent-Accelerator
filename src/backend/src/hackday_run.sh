@@ -9,7 +9,7 @@ if [ -z "$OPENAI_API_KEY" ]; then
     exit 1
 fi
 
-echo "🚀 Starting HACKDAY version with OpenAI..."
+echo "🌟 Starting LifePath AI - Your Personal Growth Companion"
 echo "OPENAI_API_KEY: ${OPENAI_API_KEY:0:7}..."
 
 # Set minimal env vars
@@ -28,19 +28,21 @@ export MEMORA_ENABLED="${MEMORA_ENABLED:-true}"
 export MEMORA_BASE_URL="${MEMORA_BASE_URL:-http://localhost:8000}"
 export MEMORA_ACCOUNT_ID="${MEMORA_ACCOUNT_ID:-test-account}"
 export MEMORA_SERVICE_ID="${MEMORA_SERVICE_ID:-test-service}"
-export MEMORA_USER_ID="${MEMORA_USER_ID:-john}"  # caroline, melanie, gina, etc.
+export MEMORA_USER_ID="${MEMORA_USER_ID:-john}"  # john (197 memories), caroline, melanie, gina
 
 echo "✅ Using OpenAI model: $AOAI_DEPLOYMENT"
 echo "✅ Router type: $ROUTER_TYPE (direct to OpenAI, no Azure services)"
 
 if [ "$MEMORA_ENABLED" = "true" ]; then
-    echo "✅ Memora enabled: User '$MEMORA_USER_ID' (${MEMORA_BASE_URL})"
+    echo "✅ Memory tools enabled for: $MEMORA_USER_ID (${MEMORA_BASE_URL})"
+    echo "   🔍 search_memories - Find relevant past experiences"
+    echo "   💾 store_memory - Remember new information"
 else
-    echo "⚠️  Memora disabled (set MEMORA_ENABLED=true to enable)"
+    echo "⚠️  Memory tools disabled (set MEMORA_ENABLED=true to enable)"
 fi
 
 echo ""
-echo "🌐 Starting server on http://127.0.0.1:7000"
+echo "🌐 Open LifePath AI at: http://127.0.0.1:7000"
 echo ""
 
 # Run the app

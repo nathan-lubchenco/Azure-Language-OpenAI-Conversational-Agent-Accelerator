@@ -1,6 +1,6 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# HACKDAY: Added data logging and Memora integration
+# HACKDAY: Added data logging and Memora tool-based integration
 import os
 import json
 import importlib
@@ -17,6 +17,7 @@ from unified_conversation_orchestrator import UnifiedConversationOrchestrator
 from utils import get_azure_credential
 from data_logger import log_utterance_extraction, log_orchestration, log_chat_completion, log_error, get_log_stats
 from memora_client import MemoraClient
+from memory_tools import create_memory_tools
 
 
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "dist"))
@@ -37,12 +38,40 @@ search_client = MockSearchClient(
     credential=None
 )
 
-# RAG AOAI client (now using OpenAI):
+# HACKDAY: Memora integration
+MEMORA_ENABLED = os.environ.get("MEMORA_ENABLED", "false").lower() == "true"
+MEMORA_USER_ID = os.environ.get("MEMORA_USER_ID", "caroline")  # Default to caroline
+
+if MEMORA_ENABLED:
+    memora_client = MemoraClient(
+        base_url=os.environ.get("MEMORA_BASE_URL", "http://localhost:8000"),
+        account_id=os.environ.get("MEMORA_ACCOUNT_ID", "test-account"),
+        service_id=os.environ.get("MEMORA_SERVICE_ID", "test-service")
+    )
+    print(f"✅ Memora integration enabled for user: {MEMORA_USER_ID}")
+
+    # Create memory tools
+    memory_tools, memory_tool_implementations = create_memory_tools(memora_client, MEMORA_USER_ID)
+    print(f"✅ Created {len(memory_tools)} memory tools: {[t['function']['name'] for t in memory_tools]}")
+else:
+    memora_client = None
+    memory_tools = []
+    memory_tool_implementations = {}
+    print("⚠️  Memora integration disabled")
+
+# LifePath AI system prompt
+lifepath_prompt = get_prompt("lifepath_system.txt")
+
+# RAG AOAI client (now using OpenAI with memory tools):
 rag_client = AOAIClient(
     endpoint=os.environ.get("AOAI_ENDPOINT", "dummy"),  # Ignored for OpenAI
     deployment=os.environ.get("AOAI_DEPLOYMENT", "gpt-4o-mini"),
+    system_message=lifepath_prompt,  # LifePath AI personality
     use_rag=False,  # HACKDAY: Disable RAG since we don't have Azure Search
-    search_client=search_client
+    search_client=search_client,
+    function_calling=MEMORA_ENABLED,  # Enable if Memora is enabled
+    tools=memory_tools if MEMORA_ENABLED else None,
+    functions=memory_tool_implementations if MEMORA_ENABLED else None
 )
 
 
@@ -59,14 +88,15 @@ extract_client = AOAIClient(
 PII_ENABLED = os.environ.get("PII_ENABLED", "false").lower() == "true"
 
 
-# Fallback function (RAG):
+# Fallback function (RAG with tool calling):
 def fallback_function(
     query: str,
     language: str,
-    id: int
-) -> str:
+    id: int,
+    return_tool_calls: bool = False
+) -> str | dict:
     """
-    Call RAG client for grounded chat completion.
+    Call RAG client for grounded chat completion with optional tool calling.
     """
     if PII_ENABLED:
         # Redact PII:
@@ -77,7 +107,7 @@ def fallback_function(
             cache=True
         )
 
-    return rag_client.chat_completion(query)
+    return rag_client.chat_completion(query, return_tool_calls=return_tool_calls)
 
 
 # Unified-Conversation-Orchestrator:
@@ -87,51 +117,22 @@ orchestrator = UnifiedConversationOrchestrator(
     fallback_function=fallback_function
 )
 
-# HACKDAY: Memora integration
-MEMORA_ENABLED = os.environ.get("MEMORA_ENABLED", "false").lower() == "true"
-MEMORA_USER_ID = os.environ.get("MEMORA_USER_ID", "caroline")  # Default to caroline
-
-if MEMORA_ENABLED:
-    memora_client = MemoraClient(
-        base_url=os.environ.get("MEMORA_BASE_URL", "http://localhost:8000"),
-        account_id=os.environ.get("MEMORA_ACCOUNT_ID", "test-account"),
-        service_id=os.environ.get("MEMORA_SERVICE_ID", "test-service")
-    )
-    print(f"✅ Memora integration enabled for user: {MEMORA_USER_ID}")
-else:
-    memora_client = None
-    print("⚠️  Memora integration disabled")
-
 chat_id = 0
 
 
-def orchestrate_chat(message: str) -> list[str]:
+def orchestrate_chat(message: str) -> dict:
+    """
+    Orchestrate chat with tool-based memory integration.
+
+    Returns:
+        dict with {
+            "messages": list of response strings,
+            "tool_calls": list of tool call info (if any tools were called)
+        }
+    """
     print(f"\n{'='*80}")
     print(f"🔵 NEW REQUEST: {message}")
     print(f"{'='*80}")
-
-    # HACKDAY: Step 1 - Recall relevant memories from Memora
-    memory_context = ""
-    if MEMORA_ENABLED and memora_client:
-        try:
-            print(f"📚 Recalling memories for user: {MEMORA_USER_ID}")
-            memories_response = memora_client.recall(
-                user_id=MEMORA_USER_ID,
-                query=message,
-                limit=3,
-                min_score=0.5
-            )
-            memory_count = len(memories_response.get("memories", []))
-            print(f"   Found {memory_count} relevant memories")
-
-            if memory_count > 0:
-                memory_context = memora_client.format_memories_for_context(
-                    memories_response,
-                    max_memories=3
-                )
-                print(f"   Memory context added to query")
-        except Exception as e:
-            print(f"⚠️  Memory recall failed: {e}")
 
     try:
         if PII_ENABLED:
@@ -179,15 +180,10 @@ def orchestrate_chat(message: str) -> list[str]:
 
     # Process each utterance:
     responses = []
+    all_tool_calls = []
+
     for i, query in enumerate(utterances, 1):
         print(f"\n⚙️  Processing utterance {i}/{len(utterances)}: {query}")
-
-        # HACKDAY: Add memory context to first utterance
-        if i == 1 and memory_context:
-            enriched_query = f"{memory_context}\n\nCurrent query: {query}"
-            print(f"   ✨ Enriched with memory context")
-        else:
-            enriched_query = query
 
         try:
             if PII_ENABLED:
@@ -198,18 +194,31 @@ def orchestrate_chat(message: str) -> list[str]:
                     cache=True
                 )
 
-            # Orchestrate:
+            # Orchestrate (with tool calling if enabled):
             print(f"   Calling orchestrator...")
             orchestration_response = orchestrator.orchestrate(
-                message=enriched_query,  # HACKDAY: Use enriched query with memory context
-                id=chat_id
+                message=query,
+                id=chat_id,
+                return_tool_calls=MEMORA_ENABLED  # Request tool call info if Memora enabled
             )
             print(f"   ✅ Orchestration route: {orchestration_response['route']}")
 
             # Parse response:
             response = None
+            tool_calls = []
+
             if orchestration_response["route"] == "fallback":
-                response = orchestration_response["result"]
+                result = orchestration_response["result"]
+
+                # Handle dict response with tool_calls (from AOAIClient)
+                if isinstance(result, dict) and "content" in result:
+                    response = result["content"]
+                    tool_calls = result.get("tool_calls", [])
+                    if tool_calls:
+                        print(f"   🔧 Tool calls made: {[tc['name'] for tc in tool_calls]}")
+                        all_tool_calls.extend(tool_calls)
+                else:
+                    response = result
 
             elif orchestration_response["route"] == "clu":
                 intent = orchestration_response["result"]["intent"]
@@ -260,33 +269,16 @@ def orchestrate_chat(message: str) -> list[str]:
     except Exception as e:
         print(f"Warning: Failed to log chat completion: {e}")
 
-    # HACKDAY: Step 2 - Store interaction in Memora
-    if MEMORA_ENABLED and memora_client and responses:
-        try:
-            conversation_id = f"conv_{MEMORA_USER_ID}_{datetime.now().strftime('%Y%m%d')}"
-            memory_text = f"User: {message}\nAssistant: {' '.join(responses)}"
+    result = {
+        "messages": responses,
+        "tool_calls": all_tool_calls if all_tool_calls else None
+    }
 
-            print(f"💾 Storing interaction in Memora (conversation: {conversation_id})")
-            result = memora_client.index_memory(
-                user_id=MEMORA_USER_ID,
-                text=memory_text,
-                conversation_id=conversation_id,
-                metadata={
-                    "timestamp": datetime.now().isoformat(),
-                    "router_type": router_type.name,
-                    "utterance_count": len(utterances)
-                }
-            )
-            if result:
-                print(f"   ✅ Memory stored successfully")
-            else:
-                print(f"   ⚠️  Memory storage failed")
-        except Exception as e:
-            print(f"⚠️  Memory storage error: {e}")
-
-    print(f"\n✅ RETURNING {len(responses)} responses: {responses}")
+    print(f"\n✅ RETURNING {len(responses)} responses")
+    if all_tool_calls:
+        print(f"🔧 Tool calls made: {len(all_tool_calls)}")
     print(f"{'='*80}\n")
-    return responses
+    return result
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -301,12 +293,10 @@ async def chat(request: Request):
     content = await request.json()
     message = content["message"]
 
-    responses = orchestrate_chat(message)
+    result = orchestrate_chat(message)
 
-    print(f"responses: {responses}")
-    return JSONResponse({
-        "messages": responses
-    })
+    print(f"result: {result}")
+    return JSONResponse(result)
 
 
 @app.get("/logs/stats")
@@ -314,3 +304,12 @@ async def logs_stats():
     """HACKDAY: Get statistics about logged data"""
     stats = get_log_stats()
     return JSONResponse(stats)
+
+
+@app.get("/user-info")
+async def user_info():
+    """HACKDAY: Return current user ID for UI display"""
+    return JSONResponse({
+        "user_id": MEMORA_USER_ID,
+        "memora_enabled": MEMORA_ENABLED
+    })
