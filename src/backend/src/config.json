@@ -1,0 +1,8 @@
+  {
+    "TRIAGE_AGENT_ID": "asst_dummy123",
+    "HEAD_SUPPORT_AGENT_ID": "asst_dummy456",
+    "ORDER_STATUS_AGENT_ID": "asst_dummy789",
+    "ORDER_CANCEL_AGENT_ID": "asst_dummy012",
+    "ORDER_REFUND_AGENT_ID": "asst_dummy345",
+    "TRANSLATION_AGENT_ID": "asst_dummy678"
+  }

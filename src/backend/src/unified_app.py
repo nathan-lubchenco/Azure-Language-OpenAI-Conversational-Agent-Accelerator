@@ -25,27 +25,28 @@ app = FastAPI()
 app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
 
 
-# RAG AOAI client:
-search_client = SearchClient(
-    endpoint=os.environ.get("SEARCH_ENDPOINT"),
-    index_name=os.environ.get("SEARCH_INDEX_NAME"),
-    credential=get_azure_credential()
+# HACKDAY: Use mock search client
+from hackday_mocks import MockSearchClient
+search_client = MockSearchClient(
+    endpoint=os.environ.get("SEARCH_ENDPOINT", "dummy"),
+    index_name=os.environ.get("SEARCH_INDEX_NAME", "dummy"),
+    credential=None
 )
 
-
+# RAG AOAI client (now using OpenAI):
 rag_client = AOAIClient(
-    endpoint=os.environ.get("AOAI_ENDPOINT"),
-    deployment=os.environ.get("AOAI_DEPLOYMENT"),
-    use_rag=True,
+    endpoint=os.environ.get("AOAI_ENDPOINT", "dummy"),  # Ignored for OpenAI
+    deployment=os.environ.get("AOAI_DEPLOYMENT", "gpt-4o-mini"),
+    use_rag=False,  # HACKDAY: Disable RAG since we don't have Azure Search
     search_client=search_client
 )
 
 
-# Extract-utterances AOAI client:
+# Extract-utterances AOAI client (now using OpenAI):
 extract_prompt = get_prompt("extract_utterances.txt")
 extract_client = AOAIClient(
-    endpoint=os.environ.get("AOAI_ENDPOINT"),
-    deployment=os.environ.get("AOAI_DEPLOYMENT"),
+    endpoint=os.environ.get("AOAI_ENDPOINT", "dummy"),  # Ignored for OpenAI
+    deployment=os.environ.get("AOAI_DEPLOYMENT", "gpt-4o-mini"),
     system_message=extract_prompt
 )
 

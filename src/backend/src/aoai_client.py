@@ -1,14 +1,13 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
+# HACKDAY MODIFICATION: Using OpenAI instead of Azure OpenAI
 import logging
 import json
+import os
 from typing import Callable
-from openai import AzureOpenAI
-from azure.core.credentials import TokenCredential
-from azure.identity import get_bearer_token_provider
+from openai import OpenAI
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizableTextQuery
-from utils import get_azure_credential
 
 def get_prompt(
     prompt: str,
@@ -25,20 +24,20 @@ def get_prompt(
 RAG_GROUNDING_PROMPT = get_prompt("rag_grounding.txt")
 
 
-class AOAIClient(AzureOpenAI):
+class AOAIClient(OpenAI):
     """
     Chat-only AOAI Client.
 
-    AzureOpenAI wrapper with function-calling and RAG support.
+    HACKDAY: OpenAI wrapper (not Azure) with function-calling and RAG support.
     """
 
     def __init__(
         self,
-        endpoint: str,
-        deployment: str,
-        api_version: str = "2023-12-01-preview",
-        scope: str = "https://cognitiveservices.azure.com/.default",
-        azure_credential: TokenCredential = None,
+        endpoint: str = None,  # Ignored for OpenAI, kept for compatibility
+        deployment: str = "gpt-4o-mini",  # Model name for OpenAI
+        api_version: str = None,  # Ignored for OpenAI, kept for compatibility
+        scope: str = None,  # Ignored for OpenAI, kept for compatibility
+        azure_credential = None,  # Ignored for OpenAI, kept for compatibility
         system_message: str = None,
         function_calling: bool = False,
         tools: list = None,
@@ -48,14 +47,15 @@ class AOAIClient(AzureOpenAI):
         search_client: SearchClient = None
     ) -> None:
         self.logger = logging.getLogger(self.__class__.__name__)
-        if not azure_credential:
-            azure_credential = get_azure_credential()
-        token_provider = get_bearer_token_provider(azure_credential, scope)
-        AzureOpenAI.__init__(
+
+        # HACKDAY: Use OpenAI API key from environment
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable must be set")
+
+        OpenAI.__init__(
             self,
-            api_version=api_version,
-            azure_ad_token_provider=token_provider,
-            azure_endpoint=endpoint
+            api_key=api_key
         )
 
         # Function-calling:
@@ -70,7 +70,6 @@ class AOAIClient(AzureOpenAI):
 
         # General:
         self.deployment = self.model_name = deployment
-        self.api_version = api_version
         self.chat_api = True
         self.messages = []
 

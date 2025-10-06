@@ -1,12 +1,12 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
+# HACKDAY: Using mocks for Azure services
 import os
 import uuid
 from typing import Callable
-from azure.ai.textanalytics import TextAnalyticsClient
 from router.router_type import RouterType
 from router.router_utils import create_router
-from utils import get_azure_credential
+from hackday_mocks import MockTextAnalyticsClient
 
 
 class UnifiedConversationOrchestrator():
@@ -24,9 +24,10 @@ class UnifiedConversationOrchestrator():
         """
         Initialize orchestrator: create internal TA client and router.
         """
-        self.ta_client = TextAnalyticsClient(
-            endpoint=os.environ.get("LANGUAGE_ENDPOINT"),
-            credential=get_azure_credential()
+        # HACKDAY: Use mock TextAnalyticsClient
+        self.ta_client = MockTextAnalyticsClient(
+            endpoint=os.environ.get("LANGUAGE_ENDPOINT", "dummy"),
+            credential=None
         )
 
         # Router is Callable[[str, str, str], dict]:
