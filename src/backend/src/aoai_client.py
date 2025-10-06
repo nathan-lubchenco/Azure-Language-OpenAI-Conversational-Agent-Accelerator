@@ -181,11 +181,13 @@ class AOAIClient(OpenAI):
                 return function_results
 
         # Call chat API:
+        print(f"   📤 Sending {len(self.messages)} messages to OpenAI...")
         response = self.chat.completions.create(
             model=self.deployment,
             messages=self.messages
         )
         response_message = response.choices[0].message
+        print(f"   📥 OpenAI response: {response_message.content}")
         self.logger.info(f"Model response: {response_message}")
         self.messages.append(response_message)
 

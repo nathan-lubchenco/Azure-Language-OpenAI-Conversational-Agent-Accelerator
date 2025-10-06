@@ -397,3 +397,8 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 .azure
+
+# Hackday modifications - don't commit logs or temp data
+hackday_logs/
+**/hackday_logs/
+config.json

@@ -29,6 +29,15 @@
 - Checks for `OPENAI_API_KEY`
 - Runs the server on port 7000
 
+### 6. `src/backend/src/data_logger.py` (NEW)
+- Logs all conversation data to flat files (JSONL format)
+- Tracks utterance extraction, orchestration, and chat completions
+- Stores in `./hackday_logs/` directory
+
+### 7. `src/backend/src/view_logs.py` (NEW)
+- Helper script to view and analyze logged data
+- Search logs, view statistics, filter by event type
+
 ## How to Use
 
 ### Prerequisites
@@ -50,6 +59,44 @@ cd src/backend/src
 
 ### Access the UI
 Open browser to: http://127.0.0.1:7000
+
+### View Logged Data
+
+**Using the command-line viewer:**
+```bash
+# View latest 10 conversations
+python view_logs.py
+
+# View latest 50 conversations
+python view_logs.py 50
+
+# Show statistics
+python view_logs.py stats
+
+# Search for specific content
+python view_logs.py search "return policy"
+
+# Filter by event type
+python view_logs.py utterances     # Only utterance extractions
+python view_logs.py completions    # Only chat completions
+python view_logs.py orchestration  # Only orchestration events
+python view_logs.py errors         # Only errors
+```
+
+**Using the web API:**
+```bash
+# Get log statistics
+curl http://127.0.0.1:7000/logs/stats
+```
+
+**Direct file access:**
+```bash
+# Logs are stored in JSONL format (one JSON object per line)
+cat hackday_logs/conversations_20251006.jsonl | jq .
+
+# Count conversations
+wc -l hackday_logs/*.jsonl
+```
 
 ## What Works
 
