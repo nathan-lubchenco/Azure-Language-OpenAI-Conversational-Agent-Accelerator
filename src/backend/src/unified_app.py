@@ -1,14 +1,14 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# HACKDAY: Added data logging and Memora tool-based integration
+# HACKDAY: Added data logging, Memora tool-based integration, and SMS support
 import os
 import json
 import importlib
 import pii_redacter
 from json import JSONDecodeError
 from datetime import datetime
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from azure.search.documents import SearchClient
 from aoai_client import AOAIClient, get_prompt
@@ -18,6 +18,7 @@ from utils import get_azure_credential
 from data_logger import log_utterance_extraction, log_orchestration, log_chat_completion, log_error, get_log_stats
 from memora_client import MemoraClient
 from memory_tools import create_memory_tools
+from twilio.twiml.messaging_response import MessagingResponse
 
 
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "dist"))
@@ -119,10 +120,26 @@ orchestrator = UnifiedConversationOrchestrator(
 
 chat_id = 0
 
+# HACKDAY: Phone number to user_id mapping for SMS
+# Add your phone number here!
+PHONE_USER_MAP = {
+    "+15139353686": "john",  # Your number → defaults to john
+    "+11234567890": "caroline",  # Example: other users
+    "+19876543210": "melanie",
+}
 
-def orchestrate_chat(message: str) -> dict:
+def get_user_from_phone(phone_number: str) -> str:
+    """Map phone number to user_id, default to john"""
+    return PHONE_USER_MAP.get(phone_number, "john")
+
+
+def orchestrate_chat(message: str, is_sms: bool = False) -> dict:
     """
     Orchestrate chat with tool-based memory integration.
+
+    Args:
+        message: The user's message
+        is_sms: If True, instructs LLM to be more concise for SMS
 
     Returns:
         dict with {
@@ -132,7 +149,17 @@ def orchestrate_chat(message: str) -> dict:
     """
     print(f"\n{'='*80}")
     print(f"🔵 NEW REQUEST: {message}")
+    if is_sms:
+        print(f"📱 SMS MODE: Using concise responses")
     print(f"{'='*80}")
+
+    # Temporarily modify system prompt for SMS
+    original_system_message = None
+    if is_sms and rag_client.messages and rag_client.messages[0]["role"] == "system":
+        # Save and modify the system message in the messages list
+        original_system_message = rag_client.messages[0]["content"]
+        sms_system_message = original_system_message + "\n\nCRITICAL SMS CONSTRAINT: You MUST keep your response under 800 characters (strict limit). Be extremely concise - 2-3 short paragraphs maximum. Get to the point quickly."
+        rag_client.messages[0]["content"] = sms_system_message
 
     try:
         if PII_ENABLED:
@@ -278,6 +305,11 @@ def orchestrate_chat(message: str) -> dict:
     if all_tool_calls:
         print(f"🔧 Tool calls made: {len(all_tool_calls)}")
     print(f"{'='*80}\n")
+
+    # Restore original system message if modified
+    if original_system_message is not None:
+        rag_client.messages[0]["content"] = original_system_message
+
     return result
 
 
@@ -313,3 +345,102 @@ async def user_info():
         "user_id": MEMORA_USER_ID,
         "memora_enabled": MEMORA_ENABLED
     })
+
+
+@app.post("/sms")
+async def handle_sms(
+    Body: str = Form(...),
+    From: str = Form(...),
+    To: str = Form(None),
+    MessageSid: str = Form(None)
+):
+    """
+    HACKDAY: Handle incoming SMS from Twilio
+
+    This endpoint receives Twilio SMS webhooks and responds with TwiML.
+    Keeps web chat interface working - this is completely separate!
+    """
+    print(f"\n{'='*80}")
+    print(f"📱 SMS RECEIVED")
+    print(f"From: {From}")
+    print(f"To: {To}")
+    print(f"Message: {Body}")
+    print(f"MessageSid: {MessageSid}")
+    print(f"{'='*80}\n")
+
+    # Map phone number to user_id
+    sms_user_id = get_user_from_phone(From)
+    print(f"📱 Mapped {From} → user: {sms_user_id}")
+
+    # Temporarily switch to SMS user for memory access
+    global MEMORA_USER_ID
+    original_user = MEMORA_USER_ID
+
+    # Update memora client user for this request
+    if MEMORA_ENABLED and memora_client:
+        # Recreate memory tools with SMS user
+        sms_memory_tools, sms_memory_implementations = create_memory_tools(
+            memora_client,
+            sms_user_id
+        )
+
+        # Temporarily update rag_client with SMS user's tools
+        original_tools = rag_client.functions
+        rag_client.functions = sms_memory_implementations
+
+        print(f"📱 Using memory for: {sms_user_id}")
+
+    try:
+        # Use existing orchestration logic with SMS mode!
+        result = orchestrate_chat(Body, is_sms=True)
+
+        # Create TwiML response
+        resp = MessagingResponse()
+
+        # Add each message, splitting if too long
+        SMS_CHAR_LIMIT = 1000  # Conservative limit to avoid Twilio 30044 error
+        for message in result["messages"]:
+            if len(message) > SMS_CHAR_LIMIT:
+                print(f"⚠️  Message too long ({len(message)} chars), splitting...")
+                # Split into chunks
+                parts = []
+                remaining = message
+                while remaining:
+                    if len(remaining) <= SMS_CHAR_LIMIT:
+                        parts.append(remaining)
+                        break
+                    # Find a good break point (sentence or paragraph)
+                    split_at = remaining.rfind('. ', 0, SMS_CHAR_LIMIT)
+                    if split_at == -1:
+                        split_at = remaining.rfind(' ', 0, SMS_CHAR_LIMIT)
+                    if split_at == -1:
+                        split_at = SMS_CHAR_LIMIT
+                    parts.append(remaining[:split_at+1])
+                    remaining = remaining[split_at+1:].lstrip()
+
+                for i, part in enumerate(parts, 1):
+                    prefix = f"({i}/{len(parts)}) " if len(parts) > 1 else ""
+                    resp.message(prefix + part)
+                    print(f"📱 Part {i}/{len(parts)}: {len(part)} chars")
+            else:
+                resp.message(message)
+                print(f"📱 Message length: {len(message)} chars")
+
+        # Show tool calls in terminal
+        if result.get("tool_calls"):
+            print(f"📱 Tool calls made: {[tc['name'] for tc in result['tool_calls']]}")
+
+        # Log the TwiML we're sending
+        twiml_content = str(resp)
+        print(f"\n📱 TwiML RESPONSE:\n{twiml_content}")
+        print(f"\n📱 SMS RESPONSE SENT\n{'='*80}\n")
+
+        # Return TwiML XML
+        return Response(content=twiml_content, media_type="application/xml")
+
+    finally:
+        # Restore original user
+        if MEMORA_ENABLED and memora_client:
+            rag_client.functions = original_tools
+
+        print(f"📱 Restored user: {original_user}")

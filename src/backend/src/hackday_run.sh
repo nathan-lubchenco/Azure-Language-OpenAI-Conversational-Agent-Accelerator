@@ -43,6 +43,12 @@ fi
 
 echo ""
 echo "🌐 Open LifePath AI at: http://127.0.0.1:7000"
+echo "📱 SMS webhook URL: http://127.0.0.1:7000/sms (use ngrok for external access)"
+echo ""
+echo "📱 SMS Integration:"
+echo "   1. Install ngrok: brew install ngrok"
+echo "   2. Run: ngrok http 7000"
+echo "   3. Configure Twilio webhook with ngrok URL + /sms"
 echo ""
 
 # Run the app
