@@ -15,7 +15,7 @@ echo "OPENAI_API_KEY: ${OPENAI_API_KEY:0:7}..."
 # Set minimal env vars
 export LANGUAGE_ENDPOINT="dummy"
 export AOAI_ENDPOINT="dummy"
-export AOAI_DEPLOYMENT="${AOAI_DEPLOYMENT:-gpt-4o-mini}"
+export AOAI_DEPLOYMENT="${AOAI_DEPLOYMENT:-gpt-5-mini}"
 export SEARCH_ENDPOINT="dummy"
 export SEARCH_INDEX_NAME="dummy"
 export USE_MI_AUTH="false"

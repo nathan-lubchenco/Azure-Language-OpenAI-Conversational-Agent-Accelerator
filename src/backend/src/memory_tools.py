@@ -123,7 +123,7 @@ def create_memory_tools(memora_client: MemoraClient, user_id: str):
             "type": "function",
             "function": {
                 "name": "search_memories",
-                "description": "Search the user's life memories for relevant context. CRITICAL: Use this whenever you need to know about the user's background, goals, experiences, relationships, or life situation to answer their question. Examples: 'What should I do next?' → search for 'goals aspirations career interests'. 'Tell me about my achievements' → search for 'achievements projects successes'.",
+                "description": "Search the user's life memories for relevant context. CRITICAL: Use this IMMEDIATELY when user mentions ANY specific name (person, pet, place) or when you need context to respond. Examples: 'I'm sad about Max' → search 'Max'. 'What should I do next?' → search 'goals aspirations'. ALWAYS search BEFORE asking user for more information.",
                 "parameters": {
                     "type": "object",
                     "properties": {
