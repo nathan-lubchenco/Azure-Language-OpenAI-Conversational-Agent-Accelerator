@@ -402,3 +402,13 @@ FodyWeavers.xsd
 hackday_logs/
 **/hackday_logs/
 config.json
+
+# Python virtual environments
+venv/
+**/venv/
+env/
+ENV/
+
+# Frontend build artifacts
+src/backend/src/dist/
+**/dist/
