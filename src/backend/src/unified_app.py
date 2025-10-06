@@ -1,11 +1,12 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# HACKDAY: Added data logging
+# HACKDAY: Added data logging and Memora integration
 import os
 import json
 import importlib
 import pii_redacter
 from json import JSONDecodeError
+from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +16,7 @@ from router.router_type import RouterType
 from unified_conversation_orchestrator import UnifiedConversationOrchestrator
 from utils import get_azure_credential
 from data_logger import log_utterance_extraction, log_orchestration, log_chat_completion, log_error, get_log_stats
+from memora_client import MemoraClient
 
 
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "dist"))
@@ -84,6 +86,22 @@ orchestrator = UnifiedConversationOrchestrator(
     router_type=router_type,
     fallback_function=fallback_function
 )
+
+# HACKDAY: Memora integration
+MEMORA_ENABLED = os.environ.get("MEMORA_ENABLED", "false").lower() == "true"
+MEMORA_USER_ID = os.environ.get("MEMORA_USER_ID", "caroline")  # Default to caroline
+
+if MEMORA_ENABLED:
+    memora_client = MemoraClient(
+        base_url=os.environ.get("MEMORA_BASE_URL", "http://localhost:8000"),
+        account_id=os.environ.get("MEMORA_ACCOUNT_ID", "test-account"),
+        service_id=os.environ.get("MEMORA_SERVICE_ID", "test-service")
+    )
+    print(f"✅ Memora integration enabled for user: {MEMORA_USER_ID}")
+else:
+    memora_client = None
+    print("⚠️  Memora integration disabled")
+
 chat_id = 0
 
 
@@ -91,6 +109,29 @@ def orchestrate_chat(message: str) -> list[str]:
     print(f"\n{'='*80}")
     print(f"🔵 NEW REQUEST: {message}")
     print(f"{'='*80}")
+
+    # HACKDAY: Step 1 - Recall relevant memories from Memora
+    memory_context = ""
+    if MEMORA_ENABLED and memora_client:
+        try:
+            print(f"📚 Recalling memories for user: {MEMORA_USER_ID}")
+            memories_response = memora_client.recall(
+                user_id=MEMORA_USER_ID,
+                query=message,
+                limit=3,
+                min_score=0.5
+            )
+            memory_count = len(memories_response.get("memories", []))
+            print(f"   Found {memory_count} relevant memories")
+
+            if memory_count > 0:
+                memory_context = memora_client.format_memories_for_context(
+                    memories_response,
+                    max_memories=3
+                )
+                print(f"   Memory context added to query")
+        except Exception as e:
+            print(f"⚠️  Memory recall failed: {e}")
 
     try:
         if PII_ENABLED:
@@ -140,6 +181,14 @@ def orchestrate_chat(message: str) -> list[str]:
     responses = []
     for i, query in enumerate(utterances, 1):
         print(f"\n⚙️  Processing utterance {i}/{len(utterances)}: {query}")
+
+        # HACKDAY: Add memory context to first utterance
+        if i == 1 and memory_context:
+            enriched_query = f"{memory_context}\n\nCurrent query: {query}"
+            print(f"   ✨ Enriched with memory context")
+        else:
+            enriched_query = query
+
         try:
             if PII_ENABLED:
                 # Reconstruct PII:
@@ -152,7 +201,7 @@ def orchestrate_chat(message: str) -> list[str]:
             # Orchestrate:
             print(f"   Calling orchestrator...")
             orchestration_response = orchestrator.orchestrate(
-                message=query,
+                message=enriched_query,  # HACKDAY: Use enriched query with memory context
                 id=chat_id
             )
             print(f"   ✅ Orchestration route: {orchestration_response['route']}")
@@ -210,6 +259,30 @@ def orchestrate_chat(message: str) -> list[str]:
         )
     except Exception as e:
         print(f"Warning: Failed to log chat completion: {e}")
+
+    # HACKDAY: Step 2 - Store interaction in Memora
+    if MEMORA_ENABLED and memora_client and responses:
+        try:
+            conversation_id = f"conv_{MEMORA_USER_ID}_{datetime.now().strftime('%Y%m%d')}"
+            memory_text = f"User: {message}\nAssistant: {' '.join(responses)}"
+
+            print(f"💾 Storing interaction in Memora (conversation: {conversation_id})")
+            result = memora_client.index_memory(
+                user_id=MEMORA_USER_ID,
+                text=memory_text,
+                conversation_id=conversation_id,
+                metadata={
+                    "timestamp": datetime.now().isoformat(),
+                    "router_type": router_type.name,
+                    "utterance_count": len(utterances)
+                }
+            )
+            if result:
+                print(f"   ✅ Memory stored successfully")
+            else:
+                print(f"   ⚠️  Memory storage failed")
+        except Exception as e:
+            print(f"⚠️  Memory storage error: {e}")
 
     print(f"\n✅ RETURNING {len(responses)} responses: {responses}")
     print(f"{'='*80}\n")
